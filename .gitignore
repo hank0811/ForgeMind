@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+.pytest_cache/
+
+# ForgeMind runtime data (created by running the engine, not source)
+tasks/*
+artifacts/*
+workspace/*
+logs/*
+
+# Full AI transcripts are opt-in only and must never be committed
+**/raw_transcripts/

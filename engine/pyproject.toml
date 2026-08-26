@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "forgemind"
+version = "0.1.0"
+description = "ForgeMind orchestration engine (Phase 1: deterministic core, zero AI dependency)"
+requires-python = ">=3.11"
+dependencies = [
+    "PyYAML>=6.0",
+]
+
+[project.scripts]
+forgemind = "forgemind.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["forgemind*"]

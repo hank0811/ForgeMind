@@ -1,0 +1,30 @@
+# Rule-based, default-deny sensitive-action detection.
+#
+# forgemind.governance is the sole authority on what counts as sensitive --
+# no agent's self-report is ever trusted for this decision. Patterns are
+# matched against actual plan/diff text by the orchestrator.
+
+sensitive_patterns:
+  - name: git_push
+    regex: "git\\s+push"
+    reason: "Pushes commits to a remote repository"
+
+  - name: git_merge
+    regex: "git\\s+merge"
+    reason: "Merges branches"
+
+  - name: force_delete
+    regex: "rm\\s+-rf"
+    reason: "Recursive, forced file deletion"
+
+  - name: secrets_file
+    regex: "\\.env(\\.|\\b)|credentials\\.json|secrets\\.ya?ml"
+    reason: "Touches a secrets or credentials file"
+
+  - name: package_install
+    regex: "(pip|npm|pnpm|yarn)\\s+install"
+    reason: "Installs a new dependency"
+
+approval_required_stages:
+  - plan
+  - final

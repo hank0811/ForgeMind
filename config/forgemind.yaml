@@ -1,0 +1,19 @@
+# ForgeMind Version 1 configuration.
+#
+# Phase 3: ClaudeCodeCLIRunner is real for the analyst role only. Set
+# runner to "claude_cli" to use it, or "manual" for the human-in-the-loop
+# fallback (works without Claude Code installed or authenticated).
+runner: manual
+
+retry_limits:
+  max_implementation_retries: 2
+  max_revision_retries: 2
+
+timeouts:
+  # Also bounds each ClaudeCodeCLIRunner subprocess call.
+  stage_timeout_seconds: 600
+
+claude_cli:
+  # Executable name or path, resolved via PATH at call time (never hardcode
+  # an environment-specific absolute path here).
+  executable: claude
