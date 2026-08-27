@@ -118,18 +118,40 @@ With `runner: claude_cli` instead, step 2 onward collapses to just
 `forgemind run "$TASK_ID"` repeated after each approval -- Claude performs
 each stage itself and writes the artifact.
 
+## Website interface
+
+A local website drives the exact same engine as the CLI (same
+orchestrator, state machine, governance, and runner selection -- see
+[webapp/README.md](webapp/README.md) for details):
+
+```bash
+pip install -r webapp/backend/requirements.txt
+python webapp/backend/app.py
+```
+
+Then open <http://127.0.0.1:5000>. It's local-only by design: the backend
+can execute shell commands and touch your filesystem on the pipeline's
+behalf, so it only ever binds to `127.0.0.1`.
+
+`docs/` is a separate, purely static showcase page for GitHub Pages -- it
+describes the project and links back here; it does not run the pipeline.
+GitHub Pages cannot execute the Python backend, local filesystem access,
+or Claude Code, so it was never meant to.
+
 ## Tests
 
 ```bash
 pytest
 ```
 
-Runs the full suite under `tests/engine` (see `pytest.ini`). This same
-command runs automatically in CI (`.github/workflows/tests.yml`) on every
-push, pull request, and manual trigger.
+Runs the full suite under `tests/engine` and `tests/webapp` (see
+`pytest.ini`). This same command runs automatically in CI
+(`.github/workflows/tests.yml`) on every push, pull request, and manual
+trigger.
 
 ## Scope
 
-ForgeMind V1 is the orchestration engine and CLI only. It does not include
-a website/UI, public API, database, authentication, payments, cost/usage
-tracking, notifications, or deployment automation.
+ForgeMind V1 is the orchestration engine, CLI, and a local website
+interface over the same engine. It does not include a public API,
+database, authentication, payments, cost/usage tracking, notifications,
+analytics, or deployment automation.

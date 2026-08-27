@@ -1,0 +1,5 @@
+# Website interface backend only -- the core engine (engine/pyproject.toml)
+# stays dependency-light with just PyYAML. Install both to run the website:
+#   pip install -e ./engine
+#   pip install -r webapp/backend/requirements.txt
+Flask>=3.0
