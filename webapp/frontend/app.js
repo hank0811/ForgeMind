@@ -51,7 +51,9 @@
     try { data = await res.json(); } catch (_) { /* no body */ }
     if (!res.ok) {
       const message = (data && (data.error || (data.errors && data.errors.join("; ")))) || `request failed (${res.status})`;
-      throw new Error(message);
+      const err = new Error(message);
+      err.status = res.status;
+      throw err;
     }
     return data;
   }
@@ -64,6 +66,7 @@
   const rejectTask = (id, reason) => api(`/api/tasks/${encodeURIComponent(id)}/reject`, { method: "POST", body: JSON.stringify({ reason }) });
   const submitArtifact = (id, payload) => api(`/api/tasks/${encodeURIComponent(id)}/submit-artifact`, { method: "POST", body: JSON.stringify(payload) });
   const getArtifacts = (id) => api(`/api/tasks/${encodeURIComponent(id)}/artifacts`);
+  const deleteTask = (id) => api(`/api/tasks/${encodeURIComponent(id)}`, { method: "DELETE" });
 
   // ---- Boot ------------------------------------------------------------
   async function boot() {
@@ -76,24 +79,20 @@
     }
 
     const saved = localStorage.getItem("forgemind.lastTaskId");
-    let opened = false;
     if (saved) {
-      try {
-        await openTask(saved);
-        opened = true;
-      } catch (_) {
-        localStorage.removeItem("forgemind.lastTaskId");
-      }
+      // If this saved task genuinely doesn't exist anymore, openTask()
+      // already shows the friendly "not found" state -- that IS the
+      // correct landing page here, not something to silently replace.
+      await openTask(saved);
+      return;
     }
-    if (!opened) {
-      try {
-        const tasks = await listTasks();
-        const active = tasks.find((t) => !t.is_terminal);
-        if (active) await openTask(active.task_id);
-        else showStartView();
-      } catch (_) {
-        showStartView();
-      }
+    try {
+      const tasks = await listTasks();
+      const active = tasks.find((t) => !t.is_terminal);
+      if (active) await openTask(active.task_id);
+      else showStartView();
+    } catch (_) {
+      showStartView();
     }
   }
 
@@ -121,12 +120,26 @@
     currentTaskId = null;
     localStorage.removeItem("forgemind.lastTaskId");
     els.viewWorkflow.hidden = true;
+    els.viewNotFound.hidden = true;
     els.viewStart.hidden = false;
   }
 
   function showWorkflowView() {
     els.viewStart.hidden = true;
+    els.viewNotFound.hidden = true;
     els.viewWorkflow.hidden = false;
+  }
+
+  function showNotFoundView(taskId) {
+    stopPolling();
+    currentTaskId = null;
+    localStorage.removeItem("forgemind.lastTaskId");
+    els.notFoundMessage.textContent = taskId
+      ? `Task ${taskId} doesn't exist, or was deleted.`
+      : "This task doesn't exist, or was deleted.";
+    els.viewStart.hidden = true;
+    els.viewWorkflow.hidden = true;
+    els.viewNotFound.hidden = false;
   }
 
   // ---- New task form -----------------------------------------------
@@ -134,7 +147,9 @@
     els.newTaskForm.addEventListener("submit", onCreateTask);
     els.historyToggle.addEventListener("click", openHistory);
     els.historyClose.addEventListener("click", closeHistory);
-    els.newTaskBtn.addEventListener("click", showStartView);
+    els.newTaskToggle.addEventListener("click", showStartView);
+    els.notFoundNewTask.addEventListener("click", showStartView);
+    els.notFoundHistory.addEventListener("click", openHistory);
     els.approveBtn.addEventListener("click", onApprove);
     els.rejectBtn.addEventListener("click", onReject);
     els.manualSubmitBtn.addEventListener("click", onManualSubmit);
@@ -192,28 +207,66 @@
     els.historyList.innerHTML = "";
     for (const t of tasks) {
       const li = document.createElement("li");
+      li.className = "history-row";
+
       const btn = document.createElement("button");
       btn.className = "history-item";
       btn.type = "button";
-      btn.innerHTML = `<div class="history-item-id">${escapeHtml(t.task_id)}</div>
-        <div class="history-item-state">${escapeHtml(t.state)}</div>`;
+      const title = t.request ? truncate(t.request, 60) : t.task_id;
+      btn.innerHTML = `<div class="history-item-title">${escapeHtml(title)}</div>
+        <div class="history-item-state">${escapeHtml(t.state)}</div>
+        <div class="history-item-time">${escapeHtml(formatTime(t.created_at))}</div>`;
       btn.addEventListener("click", async () => {
         closeHistory();
         await openTask(t.task_id);
       });
+
+      const del = document.createElement("button");
+      del.className = "history-delete";
+      del.type = "button";
+      del.title = "Delete this task";
+      del.setAttribute("aria-label", "Delete this task");
+      del.textContent = "✕";
+      del.addEventListener("click", async (evt) => {
+        evt.stopPropagation();
+        if (!confirm(`Delete task ${t.task_id}? This cannot be undone.`)) return;
+        try {
+          await deleteTask(t.task_id);
+          if (currentTaskId === t.task_id) showStartView();
+          await openHistory();
+        } catch (err) {
+          alert(`Could not delete: ${err.message}`);
+        }
+      });
+
       li.appendChild(btn);
+      li.appendChild(del);
       els.historyList.appendChild(li);
     }
   }
 
   // ---- Opening / polling a task -------------------------------------
   async function openTask(taskId) {
+    let status;
+    try {
+      status = await getTask(taskId);
+    } catch (err) {
+      showNotFoundView(taskId); // any fetch failure here: never leave a broken page
+      return false;
+    }
     currentTaskId = taskId;
     localStorage.setItem("forgemind.lastTaskId", taskId);
     showWorkflowView();
-    await refresh();
-    stopPolling();
-    pollTimer = setInterval(refresh, POLL_MS);
+    renderStatus(status);
+    if (!status.is_terminal) {
+      stopPolling();
+      pollTimer = setInterval(refresh, POLL_MS);
+    }
+    try {
+      const { artifacts: produced } = await getArtifacts(taskId);
+      renderArtifacts(produced);
+    } catch (_) { /* secondary info; see refresh() */ }
+    return true;
   }
 
   function stopPolling() {
@@ -222,19 +275,21 @@
 
   async function refresh() {
     if (!currentTaskId) return;
+    const taskId = currentTaskId;
     let status;
     try {
-      status = await getTask(currentTaskId);
+      status = await getTask(taskId);
     } catch (err) {
       stopPolling();
-      renderFatal(err.message);
+      if (err.status === 404) showNotFoundView(taskId);
+      else renderFatal(err.message);
       return;
     }
     renderStatus(status);
     if (status.is_terminal) stopPolling();
 
     try {
-      const { artifacts: produced } = await getArtifacts(currentTaskId);
+      const { artifacts: produced } = await getArtifacts(taskId);
       renderArtifacts(produced);
     } catch (_) {
       // Artifacts are secondary information; a fetch failure here must
@@ -251,10 +306,6 @@
   function renderStatus(status) {
     els.wfTaskId.textContent = status.task_id;
     els.wfRequest.textContent = status.request || "";
-    // Only offer "+ New task" once this one is terminal -- while it's
-    // still active the task lock (locking.py) would reject a new one
-    // anyway, so showing it earlier would just be a button that lies.
-    els.newTaskBtn.hidden = !status.is_terminal;
 
     renderStageTracker(status);
 
@@ -476,6 +527,9 @@
   }
   function formatTime(iso) {
     try { return new Date(iso).toLocaleString(); } catch (_) { return iso; }
+  }
+  function truncate(str, max) {
+    return str.length > max ? str.slice(0, max - 1) + "…" : str;
   }
 
   boot();

@@ -145,28 +145,42 @@ or Claude Code, so it was never meant to.
 1. On [render.com](https://dashboard.render.com), **New > Blueprint**,
    connect this GitHub repo (works with a private repo via Render's
    GitHub App -- no need to make it public).
-2. Render reads `render.yaml` and creates the web service automatically:
-   build installs the engine + `webapp/backend/requirements.txt`; start
-   runs `gunicorn ... app:app` bound to Render's `$PORT`.
+2. Render reads `render.yaml` and creates both the web service and a
+   free Postgres database automatically: build installs the engine +
+   `webapp/backend/requirements.txt`; start runs `gunicorn ... app:app`
+   bound to Render's `$PORT`; `DATABASE_URL` is wired to the database
+   automatically via `fromDatabase` in `render.yaml`.
 3. Deploy. Render gives you a public URL like
    `https://forgemind.onrender.com`.
 
-No environment variables are required for `runner: manual` (the default).
-`gunicorn` is pinned to a single worker process in `render.yaml` --
-required, not a tuning choice: the app's single-active-task lock and
-in-flight-run tracking live in one process's memory, and multiple worker
-processes would each keep their own copy.
+**Environment variables:** `DATABASE_URL` -- set automatically by the
+Blueprint above. Nothing else is required for `runner: manual` (the
+default). `gunicorn` is pinned to a single worker process in
+`render.yaml` -- required, not a tuning choice: the app's
+single-active-task lock and in-flight-run tracking live in one
+process's memory, and multiple worker processes would each keep their
+own copy.
 
-**Read before deploying publicly:** the deployed filesystem is ephemeral
-on Render's free/standard plans -- `tasks/`/`artifacts/` (and therefore
-all task history) are lost on every redeploy or restart unless you attach
-a persistent disk. The task lock also means only one task can run
-system-wide at a time, across every visitor -- a task left sitting at
-`BLOCKED` blocks everyone else until it's finished (there is no cancel
-endpoint). And `runner: claude_cli` should not be turned on for a public,
+**Persistent task storage:** Render's filesystem is ephemeral --
+`tasks/`/`artifacts/` alone would lose all task history on every
+restart or redeploy. When `DATABASE_URL` is set, `webapp/backend/storage.py`
+mirrors each task's files into a `forgemind_tasks` table after every
+state change, and restores them from there if they're missing locally
+(e.g. after a redeploy). With `DATABASE_URL` unset -- local dev, and the
+test suite -- this is a complete no-op; behavior is identical to before.
+Deleting a task (the History panel's delete button, or
+`DELETE /api/tasks/<id>`) removes it from both disk and the database
+permanently.
+
+**Read before deploying publicly:** the task lock means only one task
+can run system-wide at a time, across every visitor -- a task left
+sitting at `BLOCKED` blocks everyone else until it's finished or
+deleted. And `runner: claude_cli` should not be turned on for a public,
 unauthenticated deployment: it would let any visitor trigger real,
 billed Claude API calls under your account, and the Implementer/Tester
-roles have real shell-execution capability.
+roles have real shell-execution capability. Render's **free** Postgres
+plan also auto-expires 30 days after creation unless upgraded --
+check your database's expiry date on the Render dashboard.
 
 ## Tests
 

@@ -33,12 +33,14 @@ from typing import Optional
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from forgemind import artifacts, cli, governance, orchestrator
+from forgemind import artifacts, cli, governance, locking, orchestrator
 from forgemind import task as task_module
 from forgemind.config import load_config
 from forgemind.locking import TaskAlreadyActiveError
 from forgemind.runners.manual_runner import ManualRunner
 from forgemind.state_machine import TaskState, TaskStateMachine, TERMINAL_STATES
+
+import storage
 
 _FRONTEND_DIR = Path(__file__).resolve().parents[1] / "frontend"
 
@@ -118,6 +120,7 @@ def create_app(repo_root: Optional[Path] = None) -> Flask:
         finally:
             with _running_lock:
                 _running_tasks.discard(task_id)
+            storage.sync_task(tasks_root_, artifacts_root_, task_id)
 
     def _start_background_run(task_id: str) -> bool:
         """Returns False (does nothing) if a run is already in flight for
@@ -131,8 +134,14 @@ def create_app(repo_root: Optional[Path] = None) -> Flask:
         thread.start()
         return True
 
+    def _sync(task_id: str) -> None:
+        storage.sync_task(app.config["TASKS_ROOT"], app.config["ARTIFACTS_ROOT"], task_id)
+
     def _load_sm(task_id: str) -> TaskStateMachine:
-        return TaskStateMachine.load(app.config["TASKS_ROOT"], task_id)
+        tasks_root_ = app.config["TASKS_ROOT"]
+        if not (tasks_root_ / task_id / "state.json").exists():
+            storage.restore_task(tasks_root_, app.config["ARTIFACTS_ROOT"], task_id)
+        return TaskStateMachine.load(tasks_root_, task_id)
 
     def _status_payload(task_id: str) -> dict:
         sm = _load_sm(task_id)
@@ -185,19 +194,26 @@ def create_app(repo_root: Optional[Path] = None) -> Flask:
     @app.get("/api/tasks")
     def list_tasks():
         tasks_root_ = app.config["TASKS_ROOT"]
-        if not tasks_root_.exists():
-            return jsonify([])
+        artifacts_root_ = app.config["ARTIFACTS_ROOT"]
+        tasks_root_.mkdir(parents=True, exist_ok=True)
+
+        task_ids = {entry.name for entry in tasks_root_.iterdir() if entry.is_dir()}
+        task_ids.update(storage.list_known_task_ids())  # tasks that survived a restart in DB only
+
         out = []
-        for entry in tasks_root_.iterdir():
-            if not entry.is_dir():
-                continue
+        for task_id in task_ids:
+            if not (tasks_root_ / task_id / "state.json").exists():
+                if not storage.restore_task(tasks_root_, artifacts_root_, task_id):
+                    continue
             try:
-                sm = TaskStateMachine.load(tasks_root_, entry.name)
+                sm = TaskStateMachine.load(tasks_root_, task_id)
+                request_text = task_module.read_task_request(tasks_root_, task_id)
             except (FileNotFoundError, OSError):
                 continue
             out.append(
                 {
                     "task_id": sm.task_id,
+                    "request": request_text,
                     "state": sm.state.value,
                     "created_at": sm.created_at,
                     "updated_at": sm.updated_at,
@@ -234,6 +250,7 @@ def create_app(repo_root: Optional[Path] = None) -> Flask:
             wf.parent.mkdir(parents=True, exist_ok=True)
             wf.write_text(str(workspace_path), encoding="utf-8")
 
+        _sync(task.task_id)
         _start_background_run(task.task_id)
         return jsonify({"task_id": task.task_id}), 201
 
@@ -265,6 +282,7 @@ def create_app(repo_root: Optional[Path] = None) -> Flask:
         errors = orchestrator.approve_task(sm)
         if errors:
             return jsonify({"errors": errors}), 400
+        _sync(task_id)
         _start_background_run(task_id)
         return jsonify(_status_payload(task_id))
 
@@ -279,6 +297,7 @@ def create_app(repo_root: Optional[Path] = None) -> Flask:
         errors = orchestrator.reject_task(sm, reason)
         if errors:
             return jsonify({"errors": errors}), 400
+        _sync(task_id)
         return jsonify(_status_payload(task_id))
 
     # -- Manual-runner artifact submission -----------------------------------
@@ -320,8 +339,29 @@ def create_app(repo_root: Optional[Path] = None) -> Flask:
 
         if errors:
             return jsonify({"errors": errors}), 400
+        _sync(task_id)
         _start_background_run(task_id)
         return jsonify(_status_payload(task_id))
+
+    # -- Delete ------------------------------------------------------------
+    @app.delete("/api/tasks/<task_id>")
+    def delete_task_route(task_id: str):
+        tasks_root_ = app.config["TASKS_ROOT"]
+        artifacts_root_ = app.config["ARTIFACTS_ROOT"]
+        try:
+            _load_sm(task_id)  # 404s if truly unknown anywhere (disk or DB)
+        except FileNotFoundError:
+            return jsonify({"error": f"no such task: {task_id}"}), 404
+
+        with _running_lock:
+            if task_id in _running_tasks:
+                return jsonify({"error": "task is currently running; wait for it to stop before deleting"}), 409
+
+        locking.release(tasks_root_, task_id)  # no-op unless this task held the lock
+        shutil.rmtree(tasks_root_ / task_id, ignore_errors=True)
+        shutil.rmtree(artifacts_root_ / task_id, ignore_errors=True)
+        storage.delete_task(task_id)
+        return jsonify({"deleted": task_id})
 
     # -- Artifacts / logs -----------------------------------------------
     @app.get("/api/tasks/<task_id>/artifacts")

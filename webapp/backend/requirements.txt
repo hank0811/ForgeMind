@@ -7,3 +7,8 @@ Flask>=3.0
 # `python webapp/backend/app.py` uses Flask's own dev server. The gunicorn
 # package installs fine on Windows; only running it requires Linux.
 gunicorn>=23.0
+# Persistent task storage (storage.py). Only used when DATABASE_URL is set
+# (e.g. on Render); local dev and the test suite run with it unset, in
+# which case storage.py's functions are all no-ops and this is never
+# imported.
+psycopg[binary]>=3.1

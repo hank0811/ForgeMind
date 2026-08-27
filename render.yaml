@@ -12,3 +12,12 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.10
+      - key: DATABASE_URL
+        fromDatabase:
+          name: forgemind-db
+          property: connectionString
+
+databases:
+  - name: forgemind-db
+    plan: free
+    region: oregon
