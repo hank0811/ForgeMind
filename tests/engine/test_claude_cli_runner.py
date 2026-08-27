@@ -1,13 +1,19 @@
 """ClaudeCodeCLIRunner tests.
 
 None of these require Claude Code to be installed, authenticated, or
-funded -- subprocess.run is always mocked. This file only proves the
-runner constructs a bounded, non-interactive command and translates
-process outcomes into AgentResult correctly.
+funded -- the actual `claude` process is always mocked or stood in for by
+a real, harmless local script. Most tests mock `_launch` (the module-level
+subprocess wrapper) to prove the runner constructs a bounded,
+non-interactive command and translates process outcomes into AgentResult
+correctly. A few (search "process-tree" below) deliberately run real OS
+processes to prove the timeout/kill behavior itself, since that can't be
+proven by mocking the thing it's testing.
 """
 from __future__ import annotations
 
+import os
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -80,7 +86,7 @@ def test_builds_expected_bounded_noninteractive_command(repo, agents_dir, monkey
         return _fake_completed(returncode=0)
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "C:\\fake\\claude.CMD")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir, timeout_seconds=42)
     runner.run_agent(
@@ -137,7 +143,7 @@ def test_no_argv_element_ever_contains_a_newline(repo, agents_dir, monkeypatch):
         return _fake_completed(returncode=0)
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     # architect_planner's real role file is long, multi-paragraph markdown
     # -- exactly the shape that would have broken the old
@@ -173,7 +179,7 @@ def test_command_omits_allowedTools_when_none_given(repo, agents_dir, monkeypatc
         return _fake_completed(returncode=0)
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir)
     runner.run_agent(
@@ -198,7 +204,7 @@ def test_successful_execution_returns_ok_result(repo, agents_dir, monkeypatch):
         return _fake_completed(returncode=0, stdout='{"type":"result","is_error":false}')
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir)
     result = runner.run_agent(
@@ -225,7 +231,7 @@ def test_nonzero_exit_returns_error_result(repo, agents_dir, monkeypatch):
         return _fake_completed(returncode=1, stderr="boom")
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir)
     result = runner.run_agent(
@@ -246,7 +252,7 @@ def test_timeout_is_handled_and_does_not_hang(repo, agents_dir, monkeypatch):
         raise subprocess.TimeoutExpired(cmd=command, timeout=kwargs.get("timeout"))
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir, timeout_seconds=5)
     result = runner.run_agent(
@@ -267,7 +273,7 @@ def test_missing_expected_artifact_returns_error(repo, agents_dir, monkeypatch):
         return _fake_completed(returncode=0)
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir)
     result = runner.run_agent(
@@ -290,7 +296,7 @@ def test_missing_claude_executable_returns_error_without_launching(repo, agents_
         return _fake_completed(returncode=0)
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: None)
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir)
     result = runner.run_agent(
@@ -334,7 +340,7 @@ def test_unsupported_role_returns_error_without_launching(repo, agents_dir, monk
     calls = []
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
     monkeypatch.setattr(
-        "forgemind.runners.claude_cli_runner.subprocess.run",
+        "forgemind.runners.claude_cli_runner._launch",
         lambda *a, **k: calls.append(1) or _fake_completed(),
     )
 
@@ -366,7 +372,7 @@ def test_orchestrator_end_to_end_with_mocked_claude_cli(repo, agents_dir, monkey
         return _fake_completed(returncode=0)
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     from forgemind import locking
 
@@ -420,7 +426,7 @@ def test_architect_planner_command_includes_role_prompt_and_input_artifact(repo,
         return _fake_completed(returncode=0)
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir, timeout_seconds=99)
     runner.run_agent(
@@ -459,7 +465,7 @@ def test_architect_planner_successful_execution_returns_ok_result(repo, agents_d
         return _fake_completed(returncode=0)
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir)
     result = runner.run_agent(
@@ -479,7 +485,7 @@ def test_architect_planner_successful_execution_returns_ok_result(repo, agents_d
 def test_architect_planner_nonzero_exit_returns_error(repo, agents_dir, monkeypatch):
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
     monkeypatch.setattr(
-        "forgemind.runners.claude_cli_runner.subprocess.run",
+        "forgemind.runners.claude_cli_runner._launch",
         lambda command, **kwargs: _fake_completed(returncode=2, stderr="boom"),
     )
 
@@ -501,7 +507,7 @@ def test_architect_planner_timeout_is_handled(repo, agents_dir, monkeypatch):
         raise subprocess.TimeoutExpired(cmd=command, timeout=kwargs.get("timeout"))
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir, timeout_seconds=7)
     result = runner.run_agent(
@@ -519,7 +525,7 @@ def test_architect_planner_timeout_is_handled(repo, agents_dir, monkeypatch):
 def test_architect_planner_missing_output_artifact_returns_error(repo, agents_dir, monkeypatch):
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
     monkeypatch.setattr(
-        "forgemind.runners.claude_cli_runner.subprocess.run",
+        "forgemind.runners.claude_cli_runner._launch",
         lambda command, **kwargs: _fake_completed(returncode=0),  # never writes the file
     )
 
@@ -548,7 +554,7 @@ def test_architect_planner_invalid_artifact_fails_orchestrator_validation(repo, 
         return _fake_completed(returncode=0)
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir)
     result = runner.run_agent(
@@ -568,7 +574,7 @@ def test_architect_planner_missing_executable_returns_error_without_launching(re
     calls = []
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: None)
     monkeypatch.setattr(
-        "forgemind.runners.claude_cli_runner.subprocess.run",
+        "forgemind.runners.claude_cli_runner._launch",
         lambda *a, **k: calls.append(1) or _fake_completed(),
     )
 
@@ -617,7 +623,7 @@ def test_orchestrator_reaches_designed_with_mocked_claude_cli_architect_planner(
         return _fake_completed(returncode=0)
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     from forgemind import locking
 
@@ -660,7 +666,7 @@ def test_governance_checkpoint_after_claude_cli_plan_auto_approves_when_not_sens
         return _fake_completed(returncode=0)
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     from forgemind import locking
 
@@ -706,7 +712,7 @@ def test_governance_checkpoint_after_claude_cli_plan_waits_when_sensitive(repo, 
         return _fake_completed(returncode=0)
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     from forgemind import locking
 
@@ -779,7 +785,7 @@ def test_implementer_command_includes_role_prompt_analysis_and_plan_inputs(repo,
         return _fake_completed(returncode=0)
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir, timeout_seconds=88)
     runner.run_agent(
@@ -827,7 +833,7 @@ def test_implementer_successful_execution_returns_ok_result(repo, agents_dir, mo
         return _fake_completed(returncode=0)
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir)
     result = runner.run_agent(
@@ -847,7 +853,7 @@ def test_implementer_successful_execution_returns_ok_result(repo, agents_dir, mo
 def test_implementer_nonzero_exit_returns_error(repo, agents_dir, monkeypatch):
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
     monkeypatch.setattr(
-        "forgemind.runners.claude_cli_runner.subprocess.run",
+        "forgemind.runners.claude_cli_runner._launch",
         lambda command, **kwargs: _fake_completed(returncode=3, stderr="boom"),
     )
 
@@ -869,7 +875,7 @@ def test_implementer_timeout_is_handled(repo, agents_dir, monkeypatch):
         raise subprocess.TimeoutExpired(cmd=command, timeout=kwargs.get("timeout"))
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir, timeout_seconds=11)
     result = runner.run_agent(
@@ -887,7 +893,7 @@ def test_implementer_timeout_is_handled(repo, agents_dir, monkeypatch):
 def test_implementer_missing_output_artifact_returns_error(repo, agents_dir, monkeypatch):
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
     monkeypatch.setattr(
-        "forgemind.runners.claude_cli_runner.subprocess.run",
+        "forgemind.runners.claude_cli_runner._launch",
         lambda command, **kwargs: _fake_completed(returncode=0),  # never writes the file
     )
 
@@ -916,7 +922,7 @@ def test_implementer_invalid_artifact_fails_orchestrator_validation(repo, agents
         return _fake_completed(returncode=0)
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir)
     result = runner.run_agent(
@@ -936,7 +942,7 @@ def test_implementer_missing_executable_returns_error_without_launching(repo, ag
     calls = []
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: None)
     monkeypatch.setattr(
-        "forgemind.runners.claude_cli_runner.subprocess.run",
+        "forgemind.runners.claude_cli_runner._launch",
         lambda *a, **k: calls.append(1) or _fake_completed(),
     )
 
@@ -989,7 +995,7 @@ def test_orchestrator_reaches_implemented_with_mocked_claude_cli(repo, agents_di
         return _fake_completed(returncode=0)
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     from forgemind import locking
 
@@ -1060,7 +1066,7 @@ def test_tester_command_includes_role_prompt_and_all_three_prior_inputs(repo, ag
         return _fake_completed(returncode=0)
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir, timeout_seconds=77)
     runner.run_agent(
@@ -1114,7 +1120,7 @@ def test_tester_successful_execution_returns_ok_result(repo, agents_dir, monkeyp
         return _fake_completed(returncode=0)
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir)
     result = runner.run_agent(
@@ -1134,7 +1140,7 @@ def test_tester_successful_execution_returns_ok_result(repo, agents_dir, monkeyp
 def test_tester_nonzero_exit_returns_error(repo, agents_dir, monkeypatch):
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
     monkeypatch.setattr(
-        "forgemind.runners.claude_cli_runner.subprocess.run",
+        "forgemind.runners.claude_cli_runner._launch",
         lambda command, **kwargs: _fake_completed(returncode=4, stderr="boom"),
     )
 
@@ -1156,7 +1162,7 @@ def test_tester_timeout_is_handled(repo, agents_dir, monkeypatch):
         raise subprocess.TimeoutExpired(cmd=command, timeout=kwargs.get("timeout"))
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir, timeout_seconds=13)
     result = runner.run_agent(
@@ -1174,7 +1180,7 @@ def test_tester_timeout_is_handled(repo, agents_dir, monkeypatch):
 def test_tester_missing_output_artifact_returns_error(repo, agents_dir, monkeypatch):
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
     monkeypatch.setattr(
-        "forgemind.runners.claude_cli_runner.subprocess.run",
+        "forgemind.runners.claude_cli_runner._launch",
         lambda command, **kwargs: _fake_completed(returncode=0),  # never writes the file
     )
 
@@ -1203,7 +1209,7 @@ def test_tester_invalid_artifact_fails_orchestrator_validation(repo, agents_dir,
         return _fake_completed(returncode=0)
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir)
     result = runner.run_agent(
@@ -1223,7 +1229,7 @@ def test_tester_missing_executable_returns_error_without_launching(repo, agents_
     calls = []
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: None)
     monkeypatch.setattr(
-        "forgemind.runners.claude_cli_runner.subprocess.run",
+        "forgemind.runners.claude_cli_runner._launch",
         lambda *a, **k: calls.append(1) or _fake_completed(),
     )
 
@@ -1272,7 +1278,7 @@ def _drive_to_implemented(repo: Path, agents_dir: Path, monkeypatch) -> TaskStat
         return _fake_completed(returncode=0)
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     from forgemind import locking
 
@@ -1320,7 +1326,7 @@ def test_orchestrator_reaches_tests_passed_with_mocked_claude_cli(repo, agents_d
         artifacts.write_markdown(output_path, {"status": "ok"}, "Ran pytest: 12 passed.")
         return _fake_completed(returncode=0)
 
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir)
     result = orchestrator.start_stage(
@@ -1364,7 +1370,7 @@ def test_orchestrator_reaches_tests_failed_and_retries_with_mocked_claude_cli(re
         artifacts.write_markdown(output_path, {"status": "failed"}, "2 tests failed in auth_test.py.")
         return _fake_completed(returncode=0)
 
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir)
     result = orchestrator.start_stage(
@@ -1402,6 +1408,106 @@ def test_real_tester_role_file_loads(repo):
 
 
 # ---------------------------------------------------------------------------
+# Regression: a real Tester run on a static HTML/CSS project (no test
+# framework) stayed stuck for ~16 minutes past its configured 600s timeout,
+# and left orphaned `claude` processes running afterward. Root cause:
+# subprocess.run()'s own timeout handling only kills the ONE process it
+# directly launched (cmd.exe, since claude is a .CMD shim on Windows) --
+# not any child processes that process itself spawned (e.g. a shell
+# command Claude's Tester agent started). These tests use real OS
+# processes (no mocking of _launch/subprocess) to prove _launch actually
+# terminates the whole tree, not just the top of it.
+# ---------------------------------------------------------------------------
+
+
+from forgemind.runners.claude_cli_runner import _launch
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the real Tester hang was Windows-specific (.CMD shim + cmd.exe)")
+def test_launch_kills_entire_process_tree_on_timeout(tmp_path):
+    """Simulates exactly the real failure: a script that itself spawns a
+    detached background process (like a Claude tool call starting a shell
+    command) and then blocks. _launch(timeout=...) must return promptly
+    -- not hang for the full inner delay -- and the detached grandchild
+    must never be allowed to finish, proving the whole tree was killed,
+    not just the immediate child."""
+    marker = tmp_path / "grandchild_finished.marker"
+    script = tmp_path / "hang.bat"
+    # The grandchild ('start /B ...') would write the marker ~2s in if left
+    # alone; the parent itself blocks for far longer than our timeout.
+    script.write_text(
+        "@echo off\r\n"
+        f'start /B cmd /c "ping -n 3 127.0.0.1 >nul & echo done > \\"{marker}\\""\r\n'
+        "ping -n 30 127.0.0.1 >nul\r\n",
+        encoding="utf-8",
+    )
+
+    started = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        _launch(
+            [str(script)],
+            shell=False,
+            input="",
+            capture_output=True,
+            text=True,
+            timeout=1,
+            cwd=None,
+        )
+    elapsed = time.monotonic() - started
+
+    # Bounded: proves subprocess.run() cannot leave the pipeline blocked --
+    # this must return in roughly `timeout` + kill overhead, never anywhere
+    # near the script's real ~30s inner delay.
+    assert elapsed < 15
+
+    # Give the (correctly killed) grandchild the time it *would* have
+    # needed to write the marker if it had survived, then confirm it
+    # never did -- proof the whole tree was terminated, not just the
+    # script's own top-level process.
+    time.sleep(4)
+    assert not marker.exists(), (
+        "grandchild process survived _launch()'s timeout kill -- only the "
+        "top-level process was terminated, exactly the real Tester hang"
+    )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the real Tester hang was Windows-specific (.CMD shim + cmd.exe)")
+def test_tester_run_agent_does_not_hang_and_leaves_no_orphans(repo, agents_dir, tmp_path):
+    """End-to-end through the real ClaudeCodeCLIRunner.run_agent() (no
+    monkeypatching _launch at all) with `executable` pointed at a real
+    hanging script standing in for `claude` -- proves the fix works
+    through the actual role this bug was found on, not just _launch()
+    in isolation."""
+    marker = tmp_path / "orphan.marker"
+    script = tmp_path / "claude.bat"
+    script.write_text(
+        "@echo off\r\n"
+        f'start /B cmd /c "ping -n 3 127.0.0.1 >nul & echo done > \\"{marker}\\""\r\n'
+        "ping -n 30 127.0.0.1 >nul\r\n",
+        encoding="utf-8",
+    )
+
+    runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir, executable=str(script), timeout_seconds=1)
+
+    started = time.monotonic()
+    result = runner.run_agent(
+        role="tester",
+        task_context=_task_context(),
+        input_artifacts=[],
+        workspace_path=None,
+        allowed_capabilities=["Read", "Bash"],
+    )
+    elapsed = time.monotonic() - started
+
+    assert result.status == AgentResultStatus.TIMEOUT
+    assert "1s" in result.notes
+    assert elapsed < 15  # the pipeline stage genuinely returns, not blocked forever
+
+    time.sleep(4)
+    assert not marker.exists(), "a real Tester timeout still left an orphaned process running"
+
+
+# ---------------------------------------------------------------------------
 # Phase 7: reviewer through the same runner, same abstraction. This is the
 # fifth and final V1 role.
 # ---------------------------------------------------------------------------
@@ -1429,7 +1535,7 @@ def test_reviewer_command_includes_role_prompt_and_all_four_prior_inputs(repo, a
         return _fake_completed(returncode=0)
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir, timeout_seconds=66)
     runner.run_agent(
@@ -1487,7 +1593,7 @@ def test_reviewer_successful_execution_returns_ok_result(repo, agents_dir, monke
         return _fake_completed(returncode=0)
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir)
     result = runner.run_agent(
@@ -1507,7 +1613,7 @@ def test_reviewer_successful_execution_returns_ok_result(repo, agents_dir, monke
 def test_reviewer_nonzero_exit_returns_error(repo, agents_dir, monkeypatch):
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
     monkeypatch.setattr(
-        "forgemind.runners.claude_cli_runner.subprocess.run",
+        "forgemind.runners.claude_cli_runner._launch",
         lambda command, **kwargs: _fake_completed(returncode=5, stderr="boom"),
     )
 
@@ -1529,7 +1635,7 @@ def test_reviewer_timeout_is_handled(repo, agents_dir, monkeypatch):
         raise subprocess.TimeoutExpired(cmd=command, timeout=kwargs.get("timeout"))
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir, timeout_seconds=17)
     result = runner.run_agent(
@@ -1547,7 +1653,7 @@ def test_reviewer_timeout_is_handled(repo, agents_dir, monkeypatch):
 def test_reviewer_missing_output_artifact_returns_error(repo, agents_dir, monkeypatch):
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
     monkeypatch.setattr(
-        "forgemind.runners.claude_cli_runner.subprocess.run",
+        "forgemind.runners.claude_cli_runner._launch",
         lambda command, **kwargs: _fake_completed(returncode=0),  # never writes the file
     )
 
@@ -1576,7 +1682,7 @@ def test_reviewer_invalid_artifact_fails_orchestrator_validation(repo, agents_di
         return _fake_completed(returncode=0)
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir)
     result = runner.run_agent(
@@ -1596,7 +1702,7 @@ def test_reviewer_missing_executable_returns_error_without_launching(repo, agent
     calls = []
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: None)
     monkeypatch.setattr(
-        "forgemind.runners.claude_cli_runner.subprocess.run",
+        "forgemind.runners.claude_cli_runner._launch",
         lambda *a, **k: calls.append(1) or _fake_completed(),
     )
 
@@ -1647,7 +1753,7 @@ def _drive_to_tests_passed(repo: Path, agents_dir: Path, monkeypatch) -> TaskSta
         artifacts.write_markdown(output_path, {"status": "ok"}, "Ran pytest: 12 passed.")
         return _fake_completed(returncode=0)
 
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir)
     result = orchestrator.start_stage(
@@ -1684,7 +1790,7 @@ def test_orchestrator_reviewer_approved_reaches_final_approved_with_mocked_claud
         artifacts.write_markdown(output_path, {"status": "ok"}, "Matches the plan, no issues found.")
         return _fake_completed(returncode=0)
 
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir)
     result = orchestrator.start_stage(
@@ -1752,7 +1858,7 @@ def test_orchestrator_reviewer_changes_requested_retries_with_mocked_claude_cli(
         )
         return _fake_completed(returncode=0)
 
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir)
     result = orchestrator.start_stage(
@@ -1812,7 +1918,7 @@ def test_finalizer_command_includes_role_prompt_and_all_five_prior_inputs(repo, 
         return _fake_completed(returncode=0)
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir, timeout_seconds=55)
     runner.run_agent(
@@ -1863,7 +1969,7 @@ def test_finalizer_successful_execution_returns_ok_result(repo, agents_dir, monk
         return _fake_completed(returncode=0)
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir)
     result = runner.run_agent(
@@ -1884,7 +1990,7 @@ def test_finalizer_successful_execution_returns_ok_result(repo, agents_dir, monk
 def test_finalizer_nonzero_exit_returns_error(repo, agents_dir, monkeypatch):
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
     monkeypatch.setattr(
-        "forgemind.runners.claude_cli_runner.subprocess.run",
+        "forgemind.runners.claude_cli_runner._launch",
         lambda command, **kwargs: _fake_completed(returncode=6, stderr="boom"),
     )
 
@@ -1906,7 +2012,7 @@ def test_finalizer_timeout_is_handled(repo, agents_dir, monkeypatch):
         raise subprocess.TimeoutExpired(cmd=command, timeout=kwargs.get("timeout"))
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir, timeout_seconds=21)
     result = runner.run_agent(
@@ -1924,7 +2030,7 @@ def test_finalizer_timeout_is_handled(repo, agents_dir, monkeypatch):
 def test_finalizer_missing_output_artifact_returns_error(repo, agents_dir, monkeypatch):
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
     monkeypatch.setattr(
-        "forgemind.runners.claude_cli_runner.subprocess.run",
+        "forgemind.runners.claude_cli_runner._launch",
         lambda command, **kwargs: _fake_completed(returncode=0),  # never writes the file
     )
 
@@ -1953,7 +2059,7 @@ def test_finalizer_invalid_artifact_fails_orchestrator_validation(repo, agents_d
         return _fake_completed(returncode=0)
 
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: "claude")
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir)
     result = runner.run_agent(
@@ -1973,7 +2079,7 @@ def test_finalizer_missing_executable_returns_error_without_launching(repo, agen
     calls = []
     monkeypatch.setattr("forgemind.runners.claude_cli_runner.shutil.which", lambda name: None)
     monkeypatch.setattr(
-        "forgemind.runners.claude_cli_runner.subprocess.run",
+        "forgemind.runners.claude_cli_runner._launch",
         lambda *a, **k: calls.append(1) or _fake_completed(),
     )
 
@@ -2026,7 +2132,7 @@ def _drive_to_reviewed(repo: Path, agents_dir: Path, monkeypatch) -> TaskStateMa
         artifacts.write_markdown(output_path, {"status": "ok"}, "Matches the plan.")
         return _fake_completed(returncode=0)
 
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir)
     result = orchestrator.start_stage(
@@ -2068,7 +2174,7 @@ def test_orchestrator_reaches_completed_with_mocked_claude_cli(repo, agents_dir,
         artifacts.write_markdown(output_path, {"status": "ok"}, "The login bug was fixed and verified.")
         return _fake_completed(returncode=0)
 
-    monkeypatch.setattr("forgemind.runners.claude_cli_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("forgemind.runners.claude_cli_runner._launch", fake_run)
 
     runner = ClaudeCodeCLIRunner(repo / "artifacts", agents_dir)
     result = orchestrator.start_stage(

@@ -55,6 +55,28 @@ Then:
   dependency you cannot install, a tool unavailable in this environment).
   Report both, but do not report a setup limitation as if it were a
   defect in the implementation, or vice versa.
+- If the project genuinely has no test framework, build, or automated
+  checks to run at all (for example, a static HTML/CSS site with no
+  build tooling), that is not a failure -- verify what you actually can
+  by static means instead: read the files, check they exist and are
+  well-formed (valid HTML/CSS, no broken references/links between the
+  files you can see), and confirm the implementation matches what the
+  plan asked for. Report `status: ok` with what you checked and note
+  that no automated test framework applies to this project.
+
+## Never run a command that does not return on its own
+
+You are invoked once and must finish and write your report. Never start a
+long-running or blocking process as your main command -- a dev/web
+server, a watch mode, an interactive prompt, or anything else that keeps
+running until something else stops it. If you need to sanity-check
+something a server would show you (e.g. that a static page loads), start
+it explicitly backgrounded/detached with its own short timeout, check
+what you need, then stop it yourself in the same turn -- never leave a
+command running and never wait on one indefinitely. If you are not
+confident a command will return within a few seconds on its own, don't
+run it; note in your report instead that you verified the relevant files
+statically rather than by serving them.
 
 ## Required output
 

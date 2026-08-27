@@ -14,6 +14,7 @@ locating the resulting artifact) lives in this file only.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import time
@@ -21,6 +22,78 @@ from pathlib import Path
 from typing import Optional
 
 from forgemind.runners.base import AgentResult, AgentResultStatus, AgentRunner
+
+
+def _kill_process_tree(pid: int) -> None:
+    """Best-effort termination of a process and everything it spawned.
+
+    subprocess.run()'s own timeout handling only kills the ONE process it
+    directly launched -- on Windows that's cmd.exe (claude is a .CMD
+    shim), which itself launched node.exe running the real Claude process,
+    which may itself have started a shell command (a dev server, a test
+    runner, ...). Killing just the top process leaves everything below it
+    running and orphaned, which is exactly what left a real Tester run
+    stuck: the Claude process it launched a long-running command that
+    never returned, subprocess.run()'s kill()-on-timeout only reaped the
+    shim, and the actual work kept running forever underneath it.
+    """
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, text=True)
+        return
+    import signal
+
+    try:
+        os.killpg(os.getpgid(pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def _launch(
+    command: list[str],
+    *,
+    shell: bool,
+    input: Optional[str],
+    capture_output: bool,
+    text: bool,
+    timeout: float,
+    cwd: Optional[str],
+) -> subprocess.CompletedProcess:
+    """Drop-in replacement for subprocess.run(command, shell=..., input=...,
+    capture_output=..., text=..., timeout=..., cwd=...) with one crucial
+    difference: on timeout, it kills the entire process tree it spawned
+    (see _kill_process_tree) instead of only the immediate child, so a
+    hung Claude invocation can never block the pipeline past
+    `timeout` or leave orphaned processes running after it.
+    """
+    assert shell is False, "claude_cli_runner must never launch with shell=True"
+    proc = subprocess.Popen(
+        command,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE if capture_output else None,
+        stderr=subprocess.PIPE if capture_output else None,
+        text=text,
+        cwd=cwd,
+        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
+        start_new_session=(os.name != "nt"),
+    )
+    try:
+        stdout, stderr = proc.communicate(input=input, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_process_tree(proc.pid)
+        # Reap the now-dead tree so we don't leak a zombie/handle; the
+        # process is already gone at this point, so this should return
+        # almost immediately -- the short timeout is only a last-resort
+        # safety net, not something callers wait on.
+        try:
+            proc.communicate(timeout=5)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        raise
+    return subprocess.CompletedProcess(command, proc.returncode, stdout, stderr)
+
 
 # Only the roles ClaudeCodeCLIRunner actually supports so far. Deliberately
 # not imported from orchestrator.ARTIFACT_FILENAMES -- runners must not
@@ -172,7 +245,7 @@ class ClaudeCodeCLIRunner(AgentRunner):
         )
 
         try:
-            completed = subprocess.run(
+            completed = _launch(
                 command,
                 shell=False,
                 input=prompt,
