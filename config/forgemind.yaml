@@ -1,8 +1,10 @@
 # ForgeMind Version 1 configuration.
 #
-# Phase 3: ClaudeCodeCLIRunner is real for the analyst role only. Set
-# runner to "claude_cli" to use it, or "manual" for the human-in-the-loop
-# fallback (works without Claude Code installed or authenticated).
+# ClaudeCodeCLIRunner is real for all six roles (analyst, architect_planner,
+# implementer, tester, reviewer, finalizer). Set runner to "claude_cli" to
+# use it (requires an authenticated `claude` on PATH), or "manual" for the
+# human-in-the-loop fallback (works without Claude Code installed or
+# authenticated).
 runner: manual
 
 retry_limits:

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "forgemind"
 version = "0.1.0"
-description = "ForgeMind orchestration engine (Phase 1: deterministic core, zero AI dependency)"
+description = "Deterministic multi-agent software-engineering orchestration engine with governance approval gates"
 requires-python = ">=3.11"
 dependencies = [
     "PyYAML>=6.0",

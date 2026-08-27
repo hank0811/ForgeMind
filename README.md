@@ -77,6 +77,47 @@ forgemind reject <task_id> --reason "<reason>"
 paused awaiting human action (approval, or a manual artifact submission),
 and `1` on any other stop reason (e.g. a genuine agent/tooling failure).
 
+## Complete walkthrough (manual runner)
+
+`runner: manual` needs no AI access, so this sequence works right after
+`pip install -e ./engine`. Only one task may be active at a time.
+
+```bash
+# 1. Create the task
+TASK_ID=$(forgemind new "Add input validation to the signup form")
+
+# 2. Run the pipeline. With no artifacts yet, it stops after the analyst
+#    stage, waiting for a human to produce 01_analysis.md.
+forgemind run "$TASK_ID"
+#   -> {"stopped_state": "BLOCKED", "reason": "awaiting_human_action", ...}
+
+# 3. Write the artifact yourself (or via an interactive Claude Code session
+#    using agents/analyst.md), then submit it:
+forgemind submit-artifact "$TASK_ID" analyst ./01_analysis.md
+
+# 4. Run again to advance to the next stage. Repeat run/submit-artifact for
+#    architect_planner, implementer, tester, reviewer, finalizer in turn --
+#    forgemind status "$TASK_ID" always shows which stage you're on.
+forgemind run "$TASK_ID"
+forgemind submit-artifact "$TASK_ID" architect_planner ./02_design_plan.md
+
+# 5. Governance: if the plan or final-report text matches a sensitive
+#    pattern in config/governance.yaml (e.g. contains "git push"), the task
+#    stops at AWAITING_PLAN_APPROVAL / AWAITING_FINAL_APPROVAL instead of
+#    continuing -- `run` will not proceed past it on its own:
+forgemind approve "$TASK_ID"      # or: forgemind reject "$TASK_ID" --reason "..."
+
+# 6. Keep alternating run / submit-artifact through tester, reviewer, and
+#    finalizer. The task ends at COMPLETED, with all six artifacts in
+#    artifacts/$TASK_ID/.
+forgemind status "$TASK_ID"
+#   -> {"state": "COMPLETED", ...}
+```
+
+With `runner: claude_cli` instead, step 2 onward collapses to just
+`forgemind run "$TASK_ID"` repeated after each approval -- Claude performs
+each stage itself and writes the artifact.
+
 ## Tests
 
 ```bash
