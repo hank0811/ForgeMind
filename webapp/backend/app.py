@@ -352,12 +352,22 @@ def create_app(repo_root: Optional[Path] = None) -> Flask:
     return app
 
 
+# WSGI entry point for gunicorn (`gunicorn app:app`), e.g. on Render.
+app = create_app()
+
+
 def main() -> None:
-    app = create_app()
-    # Bound to localhost only: this process can execute local shell commands
-    # and read/write the local filesystem on behalf of the pipeline, so it
-    # must never be reachable from the network.
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    # Local default stays 127.0.0.1-only: this process can execute local
+    # shell commands and read/write the filesystem on behalf of the
+    # pipeline, so a plain `python app.py` run must never be reachable from
+    # the network. PORT is set by hosts like Render, never by a local dev
+    # run, so its presence is what opts into a public bind -- gunicorn is
+    # the actual production server there, this branch is only a fallback.
+    port_env = os.environ.get("PORT")
+    if port_env:
+        app.run(host="0.0.0.0", port=int(port_env), debug=False)
+    else:
+        app.run(host="127.0.0.1", port=5000, debug=False)
 
 
 if __name__ == "__main__":

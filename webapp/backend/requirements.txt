@@ -3,3 +3,7 @@
 #   pip install -e ./engine
 #   pip install -r webapp/backend/requirements.txt
 Flask>=3.0
+# Production WSGI server (Render deployment). Not used for local dev --
+# `python webapp/backend/app.py` uses Flask's own dev server. The gunicorn
+# package installs fine on Windows; only running it requires Linux.
+gunicorn>=23.0

@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: forgemind
+    runtime: python
+    plan: free
+    buildCommand: pip install -e ./engine && pip install -r webapp/backend/requirements.txt
+    # workers: 1 is required, not a tuning choice -- the app tracks
+    # in-flight background pipeline runs and the single-active-task lock
+    # in one process's memory plus tasks/.active_task; multiple worker
+    # processes would each keep their own copy and could race.
+    startCommand: gunicorn --chdir webapp/backend --workers 1 --threads 4 --timeout 600 --bind 0.0.0.0:$PORT app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
