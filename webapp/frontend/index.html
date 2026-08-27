@@ -52,6 +52,21 @@
             ></textarea>
           </label>
 
+          <fieldset class="field mode-field">
+            <span class="field-label">Run mode</span>
+            <label class="mode-option">
+              <input type="radio" name="mode" id="mode-manual" value="manual" checked />
+              <span><strong>Manual</strong> &mdash; you write and submit each stage's artifact yourself</span>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="mode" id="mode-automatic" value="claude_cli" />
+              <span><strong>Automatic</strong> &mdash; Claude runs all six stages for real, one after another</span>
+            </label>
+            <span id="mode-unavailable-hint" class="field-hint" hidden>
+              Automatic mode is disabled: the <code>claude</code> CLI was not found on this server's PATH.
+            </span>
+          </fieldset>
+
           <label class="field">
             <span class="field-label">Target project folder <span class="field-optional">(optional)</span></span>
             <input
@@ -68,8 +83,6 @@
             </span>
           </label>
 
-          <div id="mode-hint" class="mode-hint"></div>
-
           <div id="start-error" class="banner banner-error" hidden></div>
 
           <button id="start-btn" class="btn btn-primary" type="submit">
@@ -84,6 +97,7 @@
           <div>
             <div class="task-id" id="wf-task-id"></div>
             <p class="task-request" id="wf-request"></p>
+            <span id="wf-mode-badge" class="badge badge-neutral"></span>
           </div>
         </div>
 

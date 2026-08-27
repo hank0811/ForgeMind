@@ -23,6 +23,7 @@ already-real, already-persisted state is sufficient and genuine.
 """
 from __future__ import annotations
 
+import dataclasses
 import os
 import shutil
 import tempfile
@@ -94,6 +95,19 @@ def create_app(repo_root: Optional[Path] = None) -> Flask:
     def _error_log_path(task_id: str) -> Path:
         return app.config["TASKS_ROOT"] / task_id / "web_run_error.log"
 
+    def _mode_file(task_id: str) -> Path:
+        return app.config["TASKS_ROOT"] / task_id / "web_mode.txt"
+
+    def _task_mode(task_id: str, default: str) -> str:
+        """Per-task runner choice made at creation time (see create_task_route).
+        Falls back to `default` (config/forgemind.yaml's `runner`) for tasks
+        created before this existed, or created via the CLI."""
+        p = _mode_file(task_id)
+        if not p.exists():
+            return default
+        text = p.read_text(encoding="utf-8").strip()
+        return text or default
+
     def _run_pipeline_background(task_id: str) -> None:
         tasks_root_ = app.config["TASKS_ROOT"]
         artifacts_root_ = app.config["ARTIFACTS_ROOT"]
@@ -102,7 +116,12 @@ def create_app(repo_root: Optional[Path] = None) -> Flask:
             config = _cfg()
             gconfig = _gov()
             sm = TaskStateMachine.load(tasks_root_, task_id)
-            runner = cli._build_runner(config, tasks_root_, artifacts_root_, agents_dir_)
+            # The task's own chosen mode (manual vs. claude_cli) always wins
+            # over config/forgemind.yaml's global default -- this is what
+            # lets one running server serve both manual and automatic tasks,
+            # chosen per task in the UI, without editing config or restarting.
+            effective_config = dataclasses.replace(config, runner=_task_mode(task_id, config.runner))
+            runner = cli._build_runner(effective_config, tasks_root_, artifacts_root_, agents_dir_)
             workspace_path = _saved_workspace(task_id)
             orchestrator.run_full_pipeline(sm, runner, artifacts_root_, workspace_path, config, gconfig)
             # A clean stop (terminal or awaiting-human) is not an error --
@@ -155,6 +174,7 @@ def create_app(repo_root: Optional[Path] = None) -> Flask:
         return {
             "task_id": sm.task_id,
             "request": request_text,
+            "mode": _task_mode(task_id, _cfg().runner),
             "state": sm.state.value,
             "blocked_from": sm.blocked_from.value if sm.blocked_from else None,
             "implementation_retry_count": sm.implementation_retry_count,
@@ -231,6 +251,15 @@ def create_app(repo_root: Optional[Path] = None) -> Flask:
         if not request_text:
             return jsonify({"error": "request text is required"}), 400
 
+        config = _cfg()
+        mode = (body.get("mode") or config.runner).strip()
+        if mode not in ("manual", "claude_cli"):
+            return jsonify({"error": f"unknown mode: {mode!r} (expected 'manual' or 'claude_cli')"}), 400
+        if mode == "claude_cli" and shutil.which(config.claude_cli_executable) is None:
+            return jsonify(
+                {"error": f"automatic mode requires the '{config.claude_cli_executable}' CLI on PATH, but it was not found"}
+            ), 400
+
         workspace_raw = (body.get("workspace_path") or "").strip()
         workspace_path: Optional[Path] = None
         if workspace_raw:
@@ -244,6 +273,8 @@ def create_app(repo_root: Optional[Path] = None) -> Flask:
             task = task_module.create_task(tasks_root_, artifacts_root_, request_text)
         except TaskAlreadyActiveError as exc:
             return jsonify({"error": str(exc)}), 409
+
+        _mode_file(task.task_id).write_text(mode, encoding="utf-8")
 
         if workspace_path is not None:
             wf = _workspace_file(task.task_id)

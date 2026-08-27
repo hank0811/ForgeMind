@@ -179,6 +179,19 @@ body {
   background: var(--surface);
 }
 
+.mode-field { border: none; padding: 0; margin: 0; }
+.mode-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13.5px;
+  color: var(--text);
+  padding: 8px 0;
+  cursor: pointer;
+}
+.mode-option input { margin-top: 3px; }
+.mode-option:has(input:disabled) { color: var(--text-faint); cursor: not-allowed; }
+
 .mode-hint {
   font-size: 13px;
   color: var(--text-muted);

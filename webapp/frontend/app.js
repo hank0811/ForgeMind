@@ -98,19 +98,14 @@
 
   function renderRunnerBadge() {
     els.runnerBadge.hidden = false;
-    if (config.runner === "claude_cli") {
-      els.runnerBadge.textContent = config.claude_cli_available
-        ? "Claude CLI mode — automatic"
-        : "Claude CLI mode — claude not found on PATH";
-      els.runnerBadge.className = "badge " + (config.claude_cli_available ? "badge-info" : "badge-warn");
-    } else {
-      els.runnerBadge.textContent = "Manual mode — you write each artifact";
-      els.runnerBadge.className = "badge badge-info";
-    }
-    if (els.modeHint) {
-      els.modeHint.textContent = config.runner === "claude_cli"
-        ? "This backend is configured for runner: claude_cli — each stage will run automatically through your authenticated Claude CLI."
-        : "This backend is configured for runner: manual — after each stage you'll be asked to paste that stage's artifact yourself.";
+    els.runnerBadge.textContent = config.claude_cli_available
+      ? "Claude CLI available on this server"
+      : "Claude CLI not found — automatic mode unavailable";
+    els.runnerBadge.className = "badge " + (config.claude_cli_available ? "badge-info" : "badge-warn");
+
+    if (!config.claude_cli_available) {
+      els.modeAutomatic.disabled = true;
+      els.modeUnavailableHint.hidden = false;
     }
   }
 
@@ -160,11 +155,12 @@
     hideBanner(els.startError);
     const requestText = els.requestInput.value.trim();
     const workspacePath = els.workspaceInput.value.trim();
+    const mode = document.querySelector('input[name="mode"]:checked')?.value || "manual";
     if (!requestText) return;
 
     setBusy(els.startBtn, true, "Starting…");
     try {
-      const { task_id } = await createTask({ request: requestText, workspace_path: workspacePath || null });
+      const { task_id } = await createTask({ request: requestText, mode, workspace_path: workspacePath || null });
       els.requestInput.value = "";
       els.workspaceInput.value = "";
       await openTask(task_id);
@@ -306,6 +302,8 @@
   function renderStatus(status) {
     els.wfTaskId.textContent = status.task_id;
     els.wfRequest.textContent = status.request || "";
+    els.wfModeBadge.textContent = status.mode === "claude_cli" ? "Automatic (Claude)" : "Manual";
+    els.wfModeBadge.className = "badge " + (status.mode === "claude_cli" ? "badge-info" : "badge-neutral");
 
     renderStageTracker(status);
 

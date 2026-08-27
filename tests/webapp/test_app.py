@@ -248,3 +248,120 @@ def test_index_serves_frontend(client):
     resp = client.get("/")
     assert resp.status_code == 200
     assert b"ForgeMind" in resp.data
+
+
+# --- Automatic (claude_cli) mode ------------------------------------------
+#
+# forgemind.yaml in these tests is always `runner: manual`; these tests
+# prove the per-task `mode` field genuinely overrides that, end to end,
+# without touching config or restarting -- using a scripted fake in place
+# of a real Claude process (no subprocess, no API cost), exactly like
+# tests/engine/test_cli.py's own runner tests do for the CLI.
+
+_AUTOMATIC_SCRIPT = {
+    "analyst": [{"status": "ok", "body": "Found the relevant files."}],
+    "architect_planner": [{"status": "ok", "body": "Add a health check route."}],
+    "implementer": [{"status": "ok", "body": "Added the route for real."}],
+    "tester": [{"status": "ok", "body": "Ran the real test suite: passed."}],
+    "reviewer": [{"status": "ok", "body": "Matches the plan."}],
+    "finalizer": [{"status": "ok", "body": "Summary of the completed work."}],
+}
+
+
+class _ScriptedFakeRunner:
+    """Same idea as tests/engine/test_cli.py's _ScriptedFakeRunner: writes
+    a scripted artifact per role and reports OK, standing in for a real
+    ClaudeCodeCLIRunner so these tests need no subprocess or API call."""
+
+    def __init__(self, artifacts_root: Path, script: dict):
+        from forgemind import artifacts as artifacts_mod
+        from forgemind.orchestrator import ARTIFACT_FILENAMES
+        from forgemind.runners.base import AgentResult, AgentResultStatus
+
+        self._artifacts_mod = artifacts_mod
+        self._filenames = ARTIFACT_FILENAMES
+        self._Result = AgentResult
+        self._Status = AgentResultStatus
+        self.artifacts_root = artifacts_root
+        self.script = {role: list(entries) for role, entries in script.items()}
+        self.calls: list[dict] = []
+
+    def run_agent(self, role, task_context, input_artifacts, workspace_path, allowed_capabilities):
+        self.calls.append({"role": role, "workspace_path": workspace_path, "capabilities": list(allowed_capabilities)})
+        entries = self.script.get(role)
+        if not entries:
+            raise AssertionError(f"no scripted response left for role '{role}'")
+        entry = entries.pop(0)
+        task_id = task_context["task_id"]
+        output_path = self.artifacts_root / task_id / self._filenames[role]
+        self._artifacts_mod.write_markdown(output_path, {"status": entry["status"]}, entry["body"])
+        return self._Result(status=self._Status.OK, output_artifact_path=output_path, runner_name="fake-claude")
+
+
+def test_create_task_rejects_automatic_mode_when_claude_missing(client, monkeypatch):
+    monkeypatch.setattr(web_app.shutil, "which", lambda _exe: None)
+    resp = client.post("/api/tasks", json={"request": "x", "mode": "claude_cli"})
+    assert resp.status_code == 400
+    assert "claude" in resp.get_json()["error"]
+
+
+def test_create_task_rejects_unknown_mode(client):
+    resp = client.post("/api/tasks", json={"request": "x", "mode": "bogus"})
+    assert resp.status_code == 400
+
+
+def test_automatic_mode_runs_real_pipeline_to_completion(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(web_app.shutil, "which", lambda _exe: "/usr/bin/claude")
+
+    fake_runner = _ScriptedFakeRunner(tmp_path / "artifacts", dict(_AUTOMATIC_SCRIPT))
+    monkeypatch.setattr(web_app.cli, "_build_runner", lambda *a, **k: fake_runner)
+
+    resp = client.post("/api/tasks", json={"request": "Automatic task", "mode": "claude_cli"})
+    assert resp.status_code == 201
+    task_id = resp.get_json()["task_id"]
+
+    status = _wait_until_idle(client, task_id)
+    assert status["mode"] == "claude_cli"
+    assert status["state"] == "COMPLETED"
+    assert status["is_terminal"] is True
+
+    # Every one of the six roles was actually invoked, in order, and none
+    # of it went through ManualRunner/pending-artifact submission.
+    assert [c["role"] for c in fake_runner.calls] == [
+        "analyst", "architect_planner", "implementer", "tester", "reviewer", "finalizer",
+    ]
+
+    produced = client.get(f"/api/tasks/{task_id}/artifacts").get_json()["artifacts"]
+    assert {a["role"] for a in produced} == {
+        "analyst", "architect_planner", "implementer", "tester", "reviewer", "finalizer",
+    }
+    assert all(a["frontmatter"]["status"] == "ok" for a in produced)
+
+
+def test_automatic_mode_still_honors_governance_pause(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(web_app.shutil, "which", lambda _exe: "/usr/bin/claude")
+    script = dict(_AUTOMATIC_SCRIPT)
+    script["architect_planner"] = [{"status": "ok", "body": "this plan needs a git push to deploy"}]
+    fake_runner = _ScriptedFakeRunner(tmp_path / "artifacts", script)
+    monkeypatch.setattr(web_app.cli, "_build_runner", lambda *a, **k: fake_runner)
+
+    resp = client.post("/api/tasks", json={"request": "Sensitive automatic task", "mode": "claude_cli"})
+    task_id = resp.get_json()["task_id"]
+
+    status = _wait_until_idle(client, task_id)
+    assert status["state"] == "AWAITING_PLAN_APPROVAL"  # automatic mode did not bypass governance
+
+    approve_resp = client.post(f"/api/tasks/{task_id}/approve")
+    assert approve_resp.status_code == 200
+    status = _wait_until_idle(client, task_id)
+    assert status["state"] == "COMPLETED"
+
+
+def test_default_mode_is_still_manual(client):
+    """No `mode` field at all (old clients, or the existing manual UI
+    flow) must keep behaving exactly as before -- manual mode."""
+    task_id = client.post("/api/tasks", json={"request": "x"}).get_json()["task_id"]
+    status = _wait_until_idle(client, task_id)
+    assert status["mode"] == "manual"
+    assert status["state"] == "BLOCKED"
+    assert status["blocked_from"] == "ANALYZING"
