@@ -40,6 +40,7 @@
   let pollTimer = null;
   let currentTaskId = null;
   let config = null;
+  const openArtifacts = new Set(); // filenames currently expanded, preserved across re-renders
 
   // ---- API -----------------------------------------------------------
   async function api(path, options) {
@@ -68,8 +69,42 @@
   const getArtifacts = (id) => api(`/api/tasks/${encodeURIComponent(id)}/artifacts`);
   const deleteTask = (id) => api(`/api/tasks/${encodeURIComponent(id)}`, { method: "DELETE" });
 
+  // ---- Theme -----------------------------------------------------------
+  const THEME_KEY = "forgemind.theme";
+  function initTheme() {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (saved === "light" || saved === "dark") document.documentElement.setAttribute("data-theme", saved);
+    els.themeToggle.addEventListener("click", () => {
+      const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+      const current = document.documentElement.getAttribute("data-theme") || (prefersDark ? "dark" : "light");
+      const next = current === "dark" ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", next);
+      try { localStorage.setItem(THEME_KEY, next); } catch (_) { /* private mode etc. */ }
+    });
+  }
+
+  // ---- Toasts ------------------------------------------------------------
+  const TOAST_ICONS = { success: "icon-check-circle", error: "icon-x-circle", info: "icon-alert" };
+  function toast(message, tone = "info") {
+    const el = document.createElement("div");
+    el.className = "toast";
+    el.dataset.tone = tone;
+    el.dataset.state = "entering";
+    el.innerHTML = `<svg class="icon toast-icon"><use href="#${TOAST_ICONS[tone] || TOAST_ICONS.info}"/></svg>
+      <span class="toast-body"></span>`;
+    el.querySelector(".toast-body").textContent = message;
+    els.toastStack.appendChild(el);
+    requestAnimationFrame(() => requestAnimationFrame(() => { el.dataset.state = "shown"; }));
+    const remove = () => {
+      el.dataset.state = "exiting";
+      setTimeout(() => el.remove(), 200);
+    };
+    setTimeout(remove, 4000);
+  }
+
   // ---- Boot ------------------------------------------------------------
   async function boot() {
+    initTheme();
     wireStaticHandlers();
     try {
       config = await getConfig();
@@ -142,6 +177,7 @@
     els.newTaskForm.addEventListener("submit", onCreateTask);
     els.historyToggle.addEventListener("click", openHistory);
     els.historyClose.addEventListener("click", closeHistory);
+    els.historyBackdrop.addEventListener("click", closeHistory);
     els.newTaskToggle.addEventListener("click", showStartView);
     els.notFoundNewTask.addEventListener("click", showStartView);
     els.notFoundHistory.addEventListener("click", openHistory);
@@ -163,6 +199,7 @@
       const { task_id } = await createTask({ request: requestText, mode, workspace_path: workspacePath || null });
       els.requestInput.value = "";
       els.workspaceInput.value = "";
+      toast("Task started", "success");
       await openTask(task_id);
     } catch (err) {
       showStartError(err.message);
@@ -185,6 +222,7 @@
   // ---- History panel -----------------------------------------------
   async function openHistory() {
     els.historyPanel.hidden = false;
+    els.historyBackdrop.hidden = false;
     els.historyList.innerHTML = '<li class="history-empty">Loading…</li>';
     try {
       const tasks = await listTasks();
@@ -193,7 +231,7 @@
       els.historyList.innerHTML = `<li class="history-empty">${escapeHtml(err.message)}</li>`;
     }
   }
-  function closeHistory() { els.historyPanel.hidden = true; }
+  function closeHistory() { els.historyPanel.hidden = true; els.historyBackdrop.hidden = true; }
 
   function renderHistory(tasks) {
     if (!tasks.length) {
@@ -209,9 +247,15 @@
       btn.className = "history-item";
       btn.type = "button";
       const title = t.request ? truncate(t.request, 60) : t.task_id;
-      btn.innerHTML = `<div class="history-item-title">${escapeHtml(title)}</div>
-        <div class="history-item-state">${escapeHtml(t.state)}</div>
-        <div class="history-item-time">${escapeHtml(formatTime(t.created_at))}</div>`;
+      const tone = toneForState(t.state);
+      btn.innerHTML = `<div class="history-item-top">
+          <div class="history-item-title"></div>
+          <span class="history-status-pill" data-tone="${tone}"></span>
+        </div>
+        <div class="history-item-time" title="${escapeHtml(formatTime(t.created_at))}"></div>`;
+      btn.querySelector(".history-item-title").textContent = title;
+      btn.querySelector(".history-status-pill").textContent = t.state.replace(/_/g, " ").toLowerCase();
+      btn.querySelector(".history-item-time").textContent = formatRelativeTime(t.created_at);
       btn.addEventListener("click", async () => {
         closeHistory();
         await openTask(t.task_id);
@@ -222,12 +266,13 @@
       del.type = "button";
       del.title = "Delete this task";
       del.setAttribute("aria-label", "Delete this task");
-      del.textContent = "✕";
+      del.innerHTML = '<svg class="icon icon-sm"><use href="#icon-trash"/></svg>';
       del.addEventListener("click", async (evt) => {
         evt.stopPropagation();
         if (!confirm(`Delete task ${t.task_id}? This cannot be undone.`)) return;
         try {
           await deleteTask(t.task_id);
+          toast("Task deleted", "success");
           if (currentTaskId === t.task_id) showStartView();
           await openHistory();
         } catch (err) {
@@ -249,6 +294,12 @@
     } catch (err) {
       showNotFoundView(taskId); // any fetch failure here: never leave a broken page
       return false;
+    }
+    if (currentTaskId !== taskId) {
+      openArtifacts.clear();
+      activityNodes.clear();
+      activityCount = 0;
+      els.activityFeed.innerHTML = "";
     }
     currentTaskId = taskId;
     localStorage.setItem("forgemind.lastTaskId", taskId);
@@ -363,7 +414,10 @@
       else if (idx < info.doneCount) stageStatus = "done";
       else if (idx === info.activeIndex) stageStatus = "active";
       li.dataset.status = stageStatus;
-      li.innerHTML = `<span class="stage-dot">${stageStatus === "done" ? "✓" : idx + 1}</span>
+      let dotContent = String(idx + 1);
+      if (stageStatus === "done") dotContent = '<svg class="icon"><use href="#icon-check"/></svg>';
+      else if (stageStatus === "failed") dotContent = '<svg class="icon"><use href="#icon-x"/></svg>';
+      li.innerHTML = `<span class="stage-dot">${dotContent}</span>
         <span class="stage-label">${STAGE_LABELS[role]}</span>`;
       els.stageTracker.appendChild(li);
     });
@@ -423,6 +477,14 @@
     els.rejectReasonWrap.hidden = false;
   }
 
+  // Mirrors orchestrator.py's actual per-role status handling: only tester
+  // reacts to "failed" and only reviewer reacts to "changes_requested" --
+  // every other role's artifact just needs a status field present. Scoping
+  // the dropdown to what's real avoids offering a choice that means nothing.
+  const VALID_STATUSES = {
+    tester: ["ok", "failed"],
+    reviewer: ["ok", "changes_requested"],
+  };
   function renderManualSubmit(status) {
     const showing = status.state === "BLOCKED";
     els.manualSubmitPanel.hidden = !showing;
@@ -432,20 +494,53 @@
     els.manualSubmitHint.textContent = role
       ? `Write the ${STAGE_LABELS[role]} stage's output below, then submit it to continue the pipeline -- exactly what \`forgemind submit-artifact\` does from the CLI.`
       : "Submit this stage's artifact to continue.";
+
+    const options = (role && VALID_STATUSES[role]) || ["ok"];
+    const current = els.manualStatus.value;
+    els.manualStatus.innerHTML = options.map((o) => `<option value="${o}">${o}</option>`).join("");
+    els.manualStatus.value = options.includes(current) ? current : options[0];
   }
 
+  // Keyed by the transition's own timestamp (unique per real state change).
+  // Append-only by design: history only ever grows at the end, so a poll
+  // that found nothing new touches zero existing DOM nodes -- no re-render,
+  // no replayed animation. Moving/reinserting an already-animating node
+  // (an earlier version of this function did that every poll) restarts its
+  // CSS animation indefinitely, which is why that approach never actually
+  // finished fading in and stayed stuck translucent. Only genuinely new
+  // entries are created and prepended; relative-time text on existing
+  // nodes is still refreshed every poll, which needs no animation at all.
+  const activityNodes = new Map();
+  let activityCount = 0;
   function renderActivity(history) {
     if (!history.length) {
       els.activityFeed.innerHTML = '<li class="activity-empty">No activity yet.</li>';
+      activityNodes.clear();
+      activityCount = 0;
       return;
     }
-    els.activityFeed.innerHTML = "";
-    for (const entry of [...history].reverse()) {
-      const li = document.createElement("li");
-      li.innerHTML = `<div class="activity-transition">${escapeHtml(entry.from)} → ${escapeHtml(entry.to)}</div>
-        ${entry.reason ? `<div class="activity-reason">${escapeHtml(entry.reason)}</div>` : ""}
-        <div class="activity-time">${escapeHtml(formatTime(entry.at))}</div>`;
-      els.activityFeed.appendChild(li);
+    const placeholder = els.activityFeed.querySelector(".activity-empty");
+    if (placeholder) placeholder.remove();
+
+    if (history.length > activityCount) {
+      // Oldest-of-the-new-batch first: prepending each in turn naturally
+      // leaves the single newest transition on top when the loop ends.
+      for (const entry of history.slice(activityCount)) {
+        const li = document.createElement("li");
+        li.innerHTML = `<div class="activity-transition">${escapeHtml(entry.from)} → ${escapeHtml(entry.to)}</div>
+          ${entry.reason ? `<div class="activity-reason">${escapeHtml(entry.reason)}</div>` : ""}
+          <div class="activity-time"></div>`;
+        activityNodes.set(entry.at, li);
+        els.activityFeed.prepend(li);
+      }
+      activityCount = history.length;
+    }
+    for (const entry of history) {
+      const li = activityNodes.get(entry.at);
+      if (!li) continue;
+      const timeEl = li.querySelector(".activity-time");
+      timeEl.title = formatTime(entry.at);
+      timeEl.textContent = formatRelativeTime(entry.at);
     }
   }
 
@@ -456,15 +551,27 @@
     }
     els.artifactsList.innerHTML = "";
     for (const a of produced) {
-      const details = document.createElement("details");
-      details.className = "artifact-item";
+      const isOpen = openArtifacts.has(a.filename);
+      const item = document.createElement("div");
+      item.className = "artifact-item";
+      item.dataset.open = String(isOpen);
       const statusVal = a.frontmatter ? a.frontmatter.status : null;
-      details.innerHTML = `<summary>
-          <span>${STAGE_LABELS[a.role] || a.role} — ${escapeHtml(a.filename)}</span>
+      item.innerHTML = `<button type="button" class="artifact-summary" aria-expanded="${isOpen}">
+          <span class="artifact-summary-left">
+            <svg class="icon artifact-chevron"><use href="#icon-chevron"/></svg>
+            <span>${STAGE_LABELS[a.role] || a.role} — ${escapeHtml(a.filename)}</span>
+          </span>
           ${statusVal ? `<span class="artifact-status-pill" data-status="${escapeHtml(String(statusVal))}">${escapeHtml(String(statusVal))}</span>` : ""}
-        </summary>
-        <pre>${escapeHtml(a.body || a.error || "")}</pre>`;
-      els.artifactsList.appendChild(details);
+        </button>
+        <div class="artifact-body"><div class="artifact-body-inner"><pre></pre></div></div>`;
+      item.querySelector("pre").textContent = a.body || a.error || "";
+      item.querySelector(".artifact-summary").addEventListener("click", () => {
+        const nowOpen = item.dataset.open !== "true";
+        item.dataset.open = String(nowOpen);
+        item.querySelector(".artifact-summary").setAttribute("aria-expanded", String(nowOpen));
+        if (nowOpen) openArtifacts.add(a.filename); else openArtifacts.delete(a.filename);
+      });
+      els.artifactsList.appendChild(item);
     }
   }
 
@@ -525,6 +632,28 @@
   }
   function formatTime(iso) {
     try { return new Date(iso).toLocaleString(); } catch (_) { return iso; }
+  }
+  function formatRelativeTime(iso) {
+    let then;
+    try { then = new Date(iso).getTime(); } catch (_) { return iso; }
+    if (Number.isNaN(then)) return iso;
+    const diffSec = Math.round((Date.now() - then) / 1000);
+    if (diffSec < 5) return "just now";
+    if (diffSec < 60) return `${diffSec}s ago`;
+    const diffMin = Math.round(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.round(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    const diffDay = Math.round(diffHr / 24);
+    if (diffDay < 7) return `${diffDay}d ago`;
+    return formatTime(iso);
+  }
+  const TERMINAL_TONE = { COMPLETED: "done", FAILED: "failed", CANCELLED: "failed", PLAN_REJECTED: "failed", FINAL_REJECTED: "failed" };
+  const WAITING_TONE_STATES = new Set(["BLOCKED", "AWAITING_PLAN_APPROVAL", "AWAITING_FINAL_APPROVAL"]);
+  function toneForState(state) {
+    if (state in TERMINAL_TONE) return TERMINAL_TONE[state];
+    if (WAITING_TONE_STATES.has(state)) return "waiting";
+    return "active";
   }
   function truncate(str, max) {
     return str.length > max ? str.slice(0, max - 1) + "…" : str;

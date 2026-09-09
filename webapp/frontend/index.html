@@ -4,26 +4,69 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ForgeMind</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%237c5cff' d='M16 2 29 9v14L16 30 3 23V9z'/%3E%3Cpath fill='%23fff' fill-opacity='.9' d='M16 8l7 4v8l-7 4-7-4v-8z'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+  <!-- Icon sprite: one inline source of truth, referenced everywhere via <use>. -->
+  <svg class="icon-sprite" aria-hidden="true">
+    <symbol id="icon-logo" viewBox="0 0 32 32"><path d="M16 2 29 9v14L16 30 3 23V9z" fill="currentColor" opacity=".16"/><path d="M16 8l7 4v8l-7 4-7-4v-8z" fill="currentColor"/></symbol>
+    <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="icon-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 8v4l3 2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="icon-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="icon-check" viewBox="0 0 24 24"><path d="M5 13l4 4 10-11" stroke="currentColor" stroke-width="2.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="icon-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" fill="none"/><path d="M8 12.5l2.5 2.5L16 9" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="icon-x-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" fill="none"/><path d="M9.5 9.5l5 5M14.5 9.5l-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="icon-alert" viewBox="0 0 24 24"><path d="M12 3.5 2 20h20z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/><path d="M12 9.5v5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="17.2" r="1.05" fill="currentColor"/></symbol>
+    <symbol id="icon-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4.6c0-.6.5-1.1 1.1-1.1h3.8c.6 0 1.1.5 1.1 1.1V7m-8 0 .8 12.4a2 2 0 0 0 2 1.9h4.4a2 2 0 0 0 2-1.9L18 7" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="icon-chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2" stroke="currentColor" stroke-width="2" fill="none"/><path d="M12 2.5v2.6M12 18.9v2.6M4.9 4.9l1.85 1.85M17.25 17.25l1.85 1.85M2.5 12h2.6M18.9 12h2.6M4.9 19.1l1.85-1.85M17.25 6.75l1.85-1.85" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="icon-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/></symbol>
+    <symbol id="icon-folder" viewBox="0 0 24 24"><path d="M3.5 6.5a1 1 0 0 1 1-1h4.7l1.8 2h8.5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/></symbol>
+    <symbol id="icon-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="11" rx="3" stroke="currentColor" stroke-width="2" fill="none"/><path d="M12 4v4M9 13v1.4M15 13v1.4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="9" cy="13.2" r=".2" fill="currentColor"/></symbol>
+    <symbol id="icon-pencil" viewBox="0 0 24 24"><path d="M4 20l.9-3.9L15.6 5.4a1.5 1.5 0 0 1 2.1 0l1 1a1.5 1.5 0 0 1 0 2.1L8 19.1z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/></symbol>
+    <symbol id="icon-sparkle" viewBox="0 0 24 24"><path d="M12 3l1.6 5.4L19 10l-5.4 1.6L12 17l-1.6-5.4L5 10l5.4-1.6z" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linejoin="round"/></symbol>
+    <symbol id="icon-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="icon-external" viewBox="0 0 24 24"><path d="M9 6H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3M14 4h6v6M20 4l-9 9" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  </svg>
+
+  <div class="bg-decor" aria-hidden="true"></div>
+
+  <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
+
   <div class="shell">
     <header class="topbar">
       <div class="brand">
-        <span class="brand-mark" aria-hidden="true">&#9670;</span>
+        <span class="brand-mark"><svg class="icon icon-lg"><use href="#icon-logo"/></svg></span>
         <span class="brand-name">ForgeMind</span>
       </div>
       <div class="topbar-right">
         <span id="runner-badge" class="badge badge-neutral" hidden></span>
-        <button id="new-task-toggle" class="btn btn-primary btn-sm" type="button">+ New Task</button>
-        <button id="history-toggle" class="btn btn-ghost" type="button">History</button>
+        <button id="theme-toggle" class="btn btn-icon btn-ghost" type="button" aria-label="Toggle theme">
+          <svg class="icon theme-icon-light"><use href="#icon-sun"/></svg>
+          <svg class="icon theme-icon-dark"><use href="#icon-moon"/></svg>
+        </button>
+        <button id="new-task-toggle" class="btn btn-primary btn-sm" type="button" aria-label="New Task">
+          <svg class="icon"><use href="#icon-plus"/></svg>
+          <span class="btn-label-text">New Task</span>
+        </button>
+        <button id="history-toggle" class="btn btn-ghost btn-sm" type="button" aria-label="History">
+          <svg class="icon"><use href="#icon-history"/></svg>
+          <span class="btn-label-text">History</span>
+        </button>
       </div>
     </header>
 
+    <div id="history-backdrop" class="history-backdrop" hidden></div>
     <div id="history-panel" class="history-panel" hidden>
       <div class="history-panel-head">
         <h2>Past tasks</h2>
-        <button id="history-close" class="btn btn-ghost btn-sm" type="button" aria-label="Close">&times;</button>
+        <button id="history-close" class="btn btn-icon btn-ghost btn-sm" type="button" aria-label="Close">
+          <svg class="icon"><use href="#icon-x"/></svg>
+        </button>
       </div>
       <ul id="history-list" class="history-list"></ul>
     </div>
@@ -32,11 +75,12 @@
       <!-- START VIEW -->
       <section id="view-start" class="view">
         <div class="hero">
+          <span class="eyebrow"><svg class="icon icon-sm"><use href="#icon-sparkle"/></svg>Real multi-agent pipeline</span>
           <h1>What should ForgeMind build?</h1>
           <p class="hero-sub">
-            Describe the task. The existing Analyst &rarr; Architect-Planner &rarr;
+            Describe the task. The real Analyst &rarr; Architect-Planner &rarr;
             Implementer &rarr; Tester &rarr; Reviewer &rarr; Finalizer pipeline runs
-            for real, with the same governance and artifact rules as the CLI.
+            end to end, with the same governance and artifact rules as the CLI.
           </p>
         </div>
 
@@ -54,28 +98,37 @@
 
           <fieldset class="field mode-field">
             <span class="field-label">Run mode</span>
-            <label class="mode-option">
-              <input type="radio" name="mode" id="mode-manual" value="manual" checked />
-              <span><strong>Manual</strong> &mdash; you write and submit each stage's artifact yourself</span>
-            </label>
-            <label class="mode-option">
-              <input type="radio" name="mode" id="mode-automatic" value="claude_cli" />
-              <span><strong>Automatic</strong> &mdash; Claude runs all six stages for real, one after another</span>
-            </label>
-            <span id="mode-unavailable-hint" class="field-hint" hidden>
+            <div class="mode-cards">
+              <label class="mode-card" for="mode-manual">
+                <input type="radio" name="mode" id="mode-manual" value="manual" checked />
+                <span class="mode-card-icon"><svg class="icon"><use href="#icon-pencil"/></svg></span>
+                <span class="mode-card-title">Manual</span>
+                <span class="mode-card-desc">You write and submit each stage's artifact yourself</span>
+              </label>
+              <label class="mode-card" for="mode-automatic">
+                <input type="radio" name="mode" id="mode-automatic" value="claude_cli" />
+                <span class="mode-card-icon"><svg class="icon"><use href="#icon-bot"/></svg></span>
+                <span class="mode-card-title">Automatic</span>
+                <span class="mode-card-desc">Claude runs all six stages for real, one after another</span>
+              </label>
+            </div>
+            <span id="mode-unavailable-hint" class="field-hint field-hint-warn" hidden>
               Automatic mode is disabled: the <code>claude</code> CLI was not found on this server's PATH.
             </span>
           </fieldset>
 
           <label class="field">
             <span class="field-label">Target project folder <span class="field-optional">(optional)</span></span>
-            <input
-              id="workspace-input"
-              class="text-input"
-              type="text"
-              placeholder="Absolute path on this machine, e.g. C:\Users\you\my-project"
-              autocomplete="off"
-            />
+            <div class="input-with-icon">
+              <svg class="icon input-icon"><use href="#icon-folder"/></svg>
+              <input
+                id="workspace-input"
+                class="text-input"
+                type="text"
+                placeholder="Absolute path on this machine, e.g. C:\Users\you\my-project"
+                autocomplete="off"
+              />
+            </div>
             <span class="field-hint">
               Only used when the pipeline actually edits files (Implementer/Tester).
               This backend runs on your machine, so it can read this path directly &mdash;
@@ -85,8 +138,9 @@
 
           <div id="start-error" class="banner banner-error" hidden></div>
 
-          <button id="start-btn" class="btn btn-primary" type="submit">
+          <button id="start-btn" class="btn btn-primary btn-lg" type="submit">
             <span class="btn-label">Start ForgeMind</span>
+            <svg class="icon btn-trailing-icon"><use href="#icon-arrow-right"/></svg>
           </button>
         </form>
       </section>
@@ -97,32 +151,46 @@
           <div>
             <div class="task-id" id="wf-task-id"></div>
             <p class="task-request" id="wf-request"></p>
-            <span id="wf-mode-badge" class="badge badge-neutral"></span>
           </div>
+          <span id="wf-mode-badge" class="badge badge-neutral"></span>
         </div>
 
         <ol id="stage-tracker" class="stage-tracker" aria-label="Pipeline stages"></ol>
 
         <div id="status-card" class="card status-card">
           <div class="status-row">
-            <span id="status-dot" class="status-dot"></span>
+            <span id="status-icon" class="status-icon">
+              <span id="status-dot" class="status-dot"></span>
+              <span id="status-spinner" class="spinner" hidden aria-label="Running"></span>
+            </span>
             <span id="status-label" class="status-label"></span>
-            <span id="status-spinner" class="spinner" hidden aria-label="Running"></span>
           </div>
           <p id="status-reason" class="status-reason"></p>
         </div>
 
         <div id="error-banner" class="banner banner-error" hidden>
-          <strong>Something went wrong.</strong>
-          <pre id="error-text"></pre>
+          <svg class="icon"><use href="#icon-x-circle"/></svg>
+          <div>
+            <strong>Something went wrong.</strong>
+            <pre id="error-text"></pre>
+          </div>
         </div>
 
         <div id="governance-panel" class="card governance-panel" hidden>
-          <h2 id="governance-title"></h2>
+          <div class="panel-heading">
+            <span class="panel-heading-icon"><svg class="icon"><use href="#icon-alert"/></svg></span>
+            <h2 id="governance-title"></h2>
+          </div>
           <p id="governance-body"></p>
           <div class="governance-actions">
-            <button id="approve-btn" class="btn btn-primary" type="button">Approve</button>
-            <button id="reject-btn" class="btn btn-danger" type="button">Reject</button>
+            <button id="approve-btn" class="btn btn-primary" type="button">
+              <svg class="icon"><use href="#icon-check"/></svg>
+              <span class="btn-label">Approve</span>
+            </button>
+            <button id="reject-btn" class="btn btn-danger" type="button">
+              <svg class="icon"><use href="#icon-x"/></svg>
+              <span class="btn-label">Reject</span>
+            </button>
           </div>
           <label class="field reject-reason-field" id="reject-reason-wrap" hidden>
             <span class="field-label">Reason for rejection</span>
@@ -131,18 +199,28 @@
         </div>
 
         <div id="manual-submit-panel" class="card manual-submit-panel" hidden>
-          <h2>Waiting for a manually-written artifact</h2>
+          <div class="panel-heading">
+            <span class="panel-heading-icon"><svg class="icon"><use href="#icon-pencil"/></svg></span>
+            <h2>Waiting for a manually-written artifact</h2>
+          </div>
           <p id="manual-submit-hint" class="hero-sub"></p>
           <label class="field">
             <span class="field-label">Status</span>
-            <input id="manual-status" class="text-input" type="text" value="ok" />
+            <select id="manual-status" class="text-input select-input">
+              <option value="ok">ok</option>
+              <option value="failed">failed</option>
+              <option value="changes_requested">changes_requested</option>
+            </select>
           </label>
           <label class="field">
             <span class="field-label">Artifact content</span>
-            <textarea id="manual-body" class="textarea" rows="8" placeholder="Write this stage's output here..."></textarea>
+            <textarea id="manual-body" class="textarea textarea-mono" rows="8" placeholder="Write this stage's output here..."></textarea>
           </label>
           <div id="manual-error" class="banner banner-error" hidden></div>
-          <button id="manual-submit-btn" class="btn btn-primary" type="button">Submit artifact</button>
+          <button id="manual-submit-btn" class="btn btn-primary" type="button">
+            <svg class="icon"><use href="#icon-check"/></svg>
+            <span class="btn-label">Submit artifact</span>
+          </button>
         </div>
 
         <div class="two-col">
@@ -160,15 +238,22 @@
 
       <!-- NOT FOUND VIEW -->
       <section id="view-not-found" class="view" hidden>
-        <div class="hero">
+        <div class="hero hero-center">
+          <span class="not-found-icon"><svg class="icon icon-xl"><use href="#icon-x-circle"/></svg></span>
           <h1>Task not found</h1>
           <p class="hero-sub" id="not-found-message">
             This task doesn't exist, or was deleted.
           </p>
         </div>
-        <div class="governance-actions">
-          <button id="not-found-new-task" class="btn btn-primary" type="button">Create New Task</button>
-          <button id="not-found-history" class="btn btn-ghost" type="button">View History</button>
+        <div class="governance-actions governance-actions-center">
+          <button id="not-found-new-task" class="btn btn-primary" type="button">
+            <svg class="icon"><use href="#icon-plus"/></svg>
+            <span>Create New Task</span>
+          </button>
+          <button id="not-found-history" class="btn btn-ghost" type="button">
+            <svg class="icon"><use href="#icon-history"/></svg>
+            <span>View History</span>
+          </button>
         </div>
       </section>
     </main>
